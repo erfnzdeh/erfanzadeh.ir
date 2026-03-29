@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>erfanzadeh.ir</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, monospace;
+  background: #0d0d0d;
+  color: #b0b0b0;
+  padding: 2rem;
+  min-height: 100vh;
+}
+h1 {
+  color: #e0e0e0;
+  font-size: 1.1rem;
+  font-weight: 400;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #222;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+h1 .notice {
+  font-size: 0.75rem;
+  color: #664444;
+  font-weight: 400;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+thead th {
+  text-align: left;
+  color: #666;
+  font-weight: 400;
+  padding: 0.4rem 0.8rem;
+  border-bottom: 1px solid #1a1a1a;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+thead th:hover { color: #999; }
+thead th.sorted::after { content: ' ▲'; }
+thead th.sorted.desc::after { content: ' ▼'; }
+tbody tr { border-bottom: 1px solid #111; }
+tbody tr:hover { background: #141414; }
+td { padding: 0.5rem 0.8rem; white-space: nowrap; }
+a {
+  color: #c8c8c8;
+  text-decoration: none;
+}
+a:hover { color: #fff; text-decoration: underline; }
+.size, .date { color: #666; }
+.size { text-align: right; }
+.err { color: #664444; margin-top: 2rem; }
+.tag {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+.tag-perm { color: #556; background: #1a1a22; }
+.tag-temp { color: #664; background: #1a1a14; }
+.upload-area {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px dashed #333;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.upload-area:hover, .upload-area.dragover { border-color: #666; }
+.upload-area input { display: none; }
+.upload-area p { color: #555; font-size: 0.85rem; }
+.progress {
+  height: 2px;
+  background: #111;
+  margin-top: 0.5rem;
+  display: none;
+}
+.progress-bar {
+  height: 100%;
+  background: #555;
+  width: 0%;
+  transition: width 0.2s;
+}
+.status {
+  font-size: 0.8rem;
+  color: #555;
+  margin-top: 0.4rem;
+  min-height: 1.2em;
+}
+.quota {
+  font-size: 0.8rem;
+  color: #444;
+  margin-bottom: 1rem;
+}
+@media (max-width: 600px) {
+  body { padding: 1rem; }
+  .date { display: none; }
+}
+</style>
+</head>
+<body>
+<h1>files <span class="notice">porn upload nakonid pls. majboor misham dar inja ro bbndm.</span></h1>
+<div class="quota" id="quota"></div>
+<div class="upload-area" id="drop">
+  <input type="file" id="fileInput" multiple>
+  <p>drop files here or click to upload</p>
+  <div class="progress" id="progress"><div class="progress-bar" id="progressBar"></div></div>
+  <div class="status" id="status"></div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th data-key="name">name</th>
+      <th data-key="size" class="size">size</th>
+      <th data-key="downloads" class="size">dl</th>
+      <th data-key="ip">uploader's ip</th>
+      <th data-key="date" class="date sorted desc">modified</th>
+    </tr>
+  </thead>
+  <tbody id="listing"></tbody>
+</table>
+<script>
+const tbody = document.getElementById('listing');
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const progress = document.getElementById('progress');
+const progressBar = document.getElementById('progressBar');
+const statusEl = document.getElementById('status');
+const quotaEl = document.getElementById('quota');
+let files = [];
+let sortKey = 'date';
+let sortAsc = false;
+
+function humanSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i];
+}
+
+function shortDate(iso) {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day} ${h}:${min}`;
+}
+
+function updateQuota() {
+  const tempUsed = files.filter(f => !f.permanent).reduce((s, f) => s + f.size, 0);
+  const limit = 10 * 1024 * 1024 * 1024;
+  quotaEl.textContent = `uploads: ${humanSize(tempUsed)} / ${humanSize(limit)}`;
+}
+
+function render() {
+  const sorted = [...files].sort((a, b) => {
+    let va = a[sortKey], vb = b[sortKey];
+    if (sortKey === 'name') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+  tbody.innerHTML = sorted.length === 0
+    ? '<tr><td colspan="5" style="color:#444">no files yet</td></tr>'
+    : sorted.map(f => {
+      const tag = f.permanent
+        ? '<span class="tag tag-perm">pinned</span>'
+        : '<span class="tag tag-temp">temp</span>';
+      return `<tr>
+        <td><a href="/files/${encodeURIComponent(f.name)}">${f.name}</a>${tag}</td>
+        <td class="size">${humanSize(f.size)}</td>
+        <td class="size">${f.downloads || 0}</td>
+        <td>${f.ip || '—'}</td>
+        <td class="date">${shortDate(f.date)}</td>
+      </tr>`;
+    }).join('');
+  updateQuota();
+}
+
+function loadFiles() {
+  fetch('/files/')
+    .then(r => r.json())
+    .then(data => {
+      files = data.map(f => ({ name: f.name, size: f.size, date: f.mtime, permanent: f.permanent, downloads: f.downloads, ip: f.ip }));
+      render();
+    })
+    .catch(() => {
+      tbody.innerHTML = '<tr><td colspan="5" class="err">could not load file listing</td></tr>';
+    });
+}
+
+function uploadFile(file) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const form = new FormData();
+    form.append('file', file);
+
+    xhr.upload.addEventListener('progress', e => {
+      if (e.lengthComputable) {
+        progressBar.style.width = Math.round(e.loaded / e.total * 100) + '%';
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
+    });
+    xhr.addEventListener('error', () => reject(new Error('network error')));
+
+    xhr.open('POST', '/upload');
+    xhr.send(form);
+  });
+}
+
+async function handleFiles(fileList) {
+  progress.style.display = 'block';
+  for (const file of fileList) {
+    statusEl.textContent = `uploading ${file.name}...`;
+    progressBar.style.width = '0%';
+    try {
+      await uploadFile(file);
+      statusEl.textContent = `uploaded ${file.name}`;
+    } catch (e) {
+      statusEl.textContent = `failed: ${e.message}`;
+    }
+  }
+  setTimeout(() => {
+    progress.style.display = 'none';
+    statusEl.textContent = '';
+  }, 2000);
+  loadFiles();
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+
+document.querySelectorAll('thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (sortKey === key) { sortAsc = !sortAsc; }
+    else { sortKey = key; sortAsc = true; }
+    document.querySelectorAll('thead th').forEach(t => { t.className = ''; });
+    th.className = 'sorted' + (sortAsc ? '' : ' desc');
+    if (key === 'size') th.classList.add('size');
+    if (key === 'date') th.classList.add('date');
+    render();
+  });
+});
+
+loadFiles();
+</script>
+</body>
+</html>

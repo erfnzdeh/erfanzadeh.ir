@@ -1,0 +1,18 @@
+# Compiled binaries
+erfanzadeh-server
+erfanzadeh-server-linux
+
+# User uploads
+uploads/
+
+# Runtime data
+assets/.ips.json
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
