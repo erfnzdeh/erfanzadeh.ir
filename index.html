@@ -26,8 +26,29 @@ h1 {
 }
 h1 .notice {
   font-size: 0.75rem;
-  color: #664444;
   font-weight: 400;
+  max-width: 60%;
+  text-align: right;
+}
+h1 .notice-text {
+  display: inline-block;
+  background: linear-gradient(90deg,
+    #ff4d4d, #ff9a3c, #ffe24d, #6fdc6f,
+    #4dc8ff, #6f7bff, #c46fff, #ff4d4d);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: rainbowShift 6s linear infinite;
+}
+h1 a.notice:hover .notice-text {
+  text-decoration: underline;
+  text-decoration-color: #888;
+}
+@keyframes rainbowShift {
+  from { background-position: 0% 50%; }
+  to   { background-position: 200% 50%; }
 }
 table {
   width: 100%;
@@ -104,11 +125,29 @@ a:hover { color: #fff; text-decoration: underline; }
 @media (max-width: 600px) {
   body { padding: 1rem; }
   .date { display: none; }
+  h1 .notice {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    margin-left: 0.75rem;
+    overflow: hidden;
+    white-space: nowrap;
+    text-align: left;
+  }
+  h1 .notice-text {
+    padding-left: 100%;
+    will-change: transform;
+    animation: rainbowShift 6s linear infinite, ticker 14s linear infinite;
+  }
+  @keyframes ticker {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-100%); }
+  }
 }
 </style>
 </head>
 <body>
-<h1>files <span class="notice">porn upload nakonid pls. majboor misham dar inja ro bbndm.</span></h1>
+<h1>files <a class="notice" href="https://github.com/erfnzdeh" target="_blank" rel="noopener"><span class="notice-text">plz follow me on github. makes me happy. link: github.com/erfnzdeh</span></a></h1>
 <div class="quota" id="quota"></div>
 <div class="upload-area" id="drop">
   <input type="file" id="fileInput" multiple>
