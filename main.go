@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -205,6 +204,46 @@ func uploadsSize(dir string) (int64, error) {
 	return total, nil
 }
 
+// evictionAge is how old an upload must be before it becomes a candidate for
+// download-count-based eviction. Files younger than this are protected.
+const evictionAge = 7 * 24 * time.Hour
+
+// pickVictim chooses which upload to delete to free space. Among files older
+// than evictionAge it picks the least-downloaded (oldest wins ties). If no file
+// is old enough, it falls back to evicting the oldest file regardless of age.
+func (s *server) pickVictim(files []fileEntry) fileEntry {
+	cutoff := time.Now().Add(-evictionAge)
+
+	var victim fileEntry
+	found := false
+	for _, f := range files {
+		t, err := time.Parse(time.RFC3339, f.MTime)
+		if err != nil || !t.Before(cutoff) {
+			continue // unparseable or younger than 7d: protected
+		}
+		if !found {
+			victim, found = f, true
+			continue
+		}
+		c, vc := s.counts[f.Name], s.counts[victim.Name]
+		if c < vc || (c == vc && f.MTime < victim.MTime) {
+			victim = f
+		}
+	}
+	if found {
+		return victim
+	}
+
+	// Fallback: nothing is old enough, evict the oldest file overall.
+	oldest := files[0]
+	for _, f := range files[1:] {
+		if f.MTime < oldest.MTime {
+			oldest = f
+		}
+	}
+	return oldest
+}
+
 func (s *server) enforce(needed int64) error {
 	for {
 		total, err := uploadsSize(s.uploadsDir)
@@ -221,12 +260,10 @@ func (s *server) enforce(needed int64) error {
 		if len(files) == 0 {
 			return fmt.Errorf("cannot free space: no upload files to delete")
 		}
-		sort.Slice(files, func(i, j int) bool {
-			return files[i].MTime < files[j].MTime
-		})
-		oldest := files[0]
-		log.Printf("quota: removing upload %s (%d bytes) to make room", oldest.Name, oldest.Size)
-		if err := os.Remove(filepath.Join(s.uploadsDir, oldest.Name)); err != nil {
+		victim := s.pickVictim(files)
+		log.Printf("quota: removing upload %s (%d bytes, %d downloads) to make room",
+			victim.Name, victim.Size, s.counts[victim.Name])
+		if err := os.Remove(filepath.Join(s.uploadsDir, victim.Name)); err != nil {
 			return err
 		}
 	}
