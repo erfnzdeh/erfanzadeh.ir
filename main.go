@@ -31,13 +31,18 @@ type fileEntry struct {
 }
 
 type server struct {
-	assetsDir  string
-	uploadsDir string
-	countsFile string
-	ipsFile    string
-	mu         sync.Mutex
-	counts     map[string]int
-	ips        map[string]string
+	assetsDir    string
+	uploadsDir   string
+	countsFile   string
+	ipsFile      string
+	transferFile string
+	mu           sync.Mutex
+	counts       map[string]int
+	ips          map[string]string
+	bytesUp      int64 // lifetime bytes uploaded
+	bytesDown    int64 // lifetime bytes downloaded
+	dlCount      int64 // lifetime download events
+	ulCount      int64 // lifetime files uploaded (incl. since-evicted)
 }
 
 func (s *server) loadCounts() {
@@ -68,6 +73,63 @@ func (s *server) saveIPs() {
 	os.WriteFile(s.ipsFile, data, 0644)
 }
 
+func (s *server) loadTransfer() {
+	data, err := os.ReadFile(s.transferFile)
+	if err != nil {
+		// First run: seed the lifetime download count from the per-file
+		// counts we've been tracking all along, so the total isn't a
+		// misleading zero on an already-busy server.
+		var seed int64
+		for _, c := range s.counts {
+			seed += int64(c)
+		}
+		if seed > 0 {
+			s.dlCount = seed
+			s.saveTransfer()
+		}
+		return
+	}
+	var v struct {
+		BytesUp     int64 `json:"bytes_up"`
+		BytesDown   int64 `json:"bytes_down"`
+		Downloads   int64 `json:"downloads"`
+		Uploads     int64 `json:"uploads"`
+		Transferred int64 `json:"transferred"` // legacy single counter
+	}
+	if json.Unmarshal(data, &v) != nil {
+		return
+	}
+	s.bytesUp = v.BytesUp
+	s.bytesDown = v.BytesDown
+	s.dlCount = v.Downloads
+	s.ulCount = v.Uploads
+	// Migrate the old combined counter: downloads dominate, so attribute it there.
+	if v.BytesUp == 0 && v.BytesDown == 0 && v.Transferred > 0 {
+		s.bytesDown = v.Transferred
+	}
+}
+
+func (s *server) saveTransfer() {
+	data, _ := json.Marshal(map[string]int64{
+		"bytes_up":   s.bytesUp,
+		"bytes_down": s.bytesDown,
+		"downloads":  s.dlCount,
+		"uploads":    s.ulCount,
+	})
+	os.WriteFile(s.transferFile, data, 0644)
+}
+
+// addBytesDown records bytes served for a download.
+func (s *server) addBytesDown(n int64) {
+	if n <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bytesDown += n
+	s.saveTransfer()
+}
+
 func (s *server) setIP(name, ip string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -79,7 +141,9 @@ func (s *server) incDownload(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.counts[name]++
+	s.dlCount++
 	s.saveCounts()
+	s.saveTransfer()
 }
 
 func listDir(dir string, permanent bool) ([]fileEntry, error) {
@@ -168,6 +232,39 @@ func (s *server) enforce(needed int64) error {
 	}
 }
 
+// countingWriter wraps an http.ResponseWriter to tally bytes actually written,
+// so range requests and partial downloads are counted accurately.
+type countingWriter struct {
+	http.ResponseWriter
+	n int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.ResponseWriter.Write(p)
+	cw.n += int64(n)
+	return n, err
+}
+
+func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	seen := make(map[string]struct{}, len(s.ips))
+	for _, ip := range s.ips {
+		if ip != "" {
+			seen[ip] = struct{}{}
+		}
+	}
+	stats := map[string]int64{
+		"bytes_up":   s.bytesUp,
+		"bytes_down": s.bytesDown,
+		"downloads":  s.dlCount,
+		"uploads":    s.ulCount,
+		"unique_ips": int64(len(seen)),
+	}
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 	files, err := s.allFiles()
 	if err != nil {
@@ -252,6 +349,9 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	s.ips[name] = ip
 	s.saveIPs()
+	s.bytesUp += written
+	s.ulCount++
+	s.saveTransfer()
 	log.Printf("uploaded: %s (%d bytes) from %s", name, written, ip)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "name": name, "size": written})
@@ -279,7 +379,9 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	s.incDownload(name)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
-	http.ServeFile(w, r, path)
+	cw := &countingWriter{ResponseWriter: w}
+	http.ServeFile(cw, r, path)
+	s.addBytesDown(cw.n)
 }
 
 func main() {
@@ -308,9 +410,14 @@ func main() {
 	if c := os.Getenv("IPS_FILE"); c != "" {
 		ipsFile = c
 	}
-	s := &server{assetsDir: assetsDir, uploadsDir: uploadsDir, countsFile: countsFile, ipsFile: ipsFile}
+	transferFile := filepath.Join(assetsDir, ".transfer.json")
+	if c := os.Getenv("TRANSFER_FILE"); c != "" {
+		transferFile = c
+	}
+	s := &server{assetsDir: assetsDir, uploadsDir: uploadsDir, countsFile: countsFile, ipsFile: ipsFile, transferFile: transferFile}
 	s.loadCounts()
 	s.loadIPs()
+	s.loadTransfer()
 
 	indexHTML, _ := indexFS.ReadFile("index.html")
 
@@ -330,6 +437,7 @@ func main() {
 		s.handleDownload(w, r)
 	})
 	http.HandleFunc("/upload", s.handleUpload)
+	http.HandleFunc("/stats", s.handleStats)
 
 	uTotal, _ := uploadsSize(uploadsDir)
 	aFiles, _ := listDir(assetsDir, true)

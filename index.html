@@ -121,6 +121,29 @@ a:hover { color: #fff; text-decoration: underline; }
   font-size: 0.8rem;
   color: #444;
   margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  white-space: nowrap;
+}
+.quota #quota { flex: 0 0 auto; }
+.stats {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+}
+.stats .stats-text { display: inline-block; }
+.stats.scroll { text-align: left; }
+.stats.scroll .stats-text {
+  padding-left: 100%;
+  will-change: transform;
+  animation: ticker 16s linear infinite;
+}
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
 }
 @media (max-width: 600px) {
   body { padding: 1rem; }
@@ -139,16 +162,15 @@ a:hover { color: #fff; text-decoration: underline; }
     will-change: transform;
     animation: rainbowShift 6s linear infinite, ticker 14s linear infinite;
   }
-  @keyframes ticker {
-    from { transform: translateX(0); }
-    to   { transform: translateX(-100%); }
-  }
 }
 </style>
 </head>
 <body>
 <h1>files <a class="notice" href="https://github.com/erfnzdeh" target="_blank" rel="noopener"><span class="notice-text">plz follow me on github. makes me happy. link: github.com/erfnzdeh</span></a></h1>
-<div class="quota" id="quota"></div>
+<div class="quota">
+  <span id="quota"></span>
+  <span class="stats" id="stats"><span class="stats-text" id="statsText"></span></span>
+</div>
 <div class="upload-area" id="drop">
   <input type="file" id="fileInput" multiple>
   <p>drop files here or click to upload</p>
@@ -175,6 +197,8 @@ const progress = document.getElementById('progress');
 const progressBar = document.getElementById('progressBar');
 const statusEl = document.getElementById('status');
 const quotaEl = document.getElementById('quota');
+const statsEl = document.getElementById('stats');
+const statsTextEl = document.getElementById('statsText');
 let files = [];
 let sortKey = 'date';
 let sortAsc = false;
@@ -202,6 +226,33 @@ function updateQuota() {
   const limit = 10 * 1024 * 1024 * 1024;
   quotaEl.textContent = `uploads: ${humanSize(tempUsed)} / ${humanSize(limit)}`;
 }
+
+function applyTicker() {
+  statsEl.classList.remove('scroll');
+  void statsEl.offsetWidth;
+  if (statsTextEl.scrollWidth > statsEl.clientWidth + 1) {
+    statsEl.classList.add('scroll');
+  }
+}
+
+function loadStats() {
+  fetch('/stats')
+    .then(r => r.json())
+    .then(d => {
+      const n = x => (x || 0).toLocaleString();
+      statsTextEl.textContent = [
+        `↓ ${humanSize(d.bytes_down || 0)}`,
+        `↑ ${humanSize(d.bytes_up || 0)}`,
+        `${n(d.downloads)} downloads`,
+        `${n(d.uploads)} files`,
+        `${n(d.unique_ips)} IPs`,
+      ].join('  ·  ');
+      applyTicker();
+    })
+    .catch(() => {});
+}
+
+window.addEventListener('resize', applyTicker);
 
 function render() {
   const sorted = [...files].sort((a, b) => {
@@ -280,6 +331,7 @@ async function handleFiles(fileList) {
     statusEl.textContent = '';
   }, 2000);
   loadFiles();
+  loadStats();
 }
 
 drop.addEventListener('click', () => fileInput.click());
@@ -306,6 +358,7 @@ document.querySelectorAll('thead th').forEach(th => {
 });
 
 loadFiles();
+loadStats();
 </script>
 </body>
 </html>
