@@ -240,9 +240,10 @@ function loadStats() {
     .then(r => r.json())
     .then(d => {
       const n = x => (x || 0).toLocaleString();
+      const e = d.estimated ? '~' : '';
       statsTextEl.textContent = [
-        `↓ ${humanSize(d.bytes_down || 0)}`,
-        `↑ ${humanSize(d.bytes_up || 0)}`,
+        `↓ ${e}${humanSize(d.bytes_down || 0)}`,
+        `↑ ${e}${humanSize(d.bytes_up || 0)}`,
         `${n(d.downloads)} downloads`,
         `${n(d.uploads)} files`,
         `${n(d.unique_ips)} IPs`,
