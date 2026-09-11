@@ -1,0 +1,43 @@
+name: Bug report
+description: Upload, download, eviction, or stats did something wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Path traversal or a write outside uploads/assets is not an issue.
+        Use a [private advisory](https://github.com/erfnzdeh/erfanzadeh.ir/security/advisories/new).
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Upload
+        - Download / file list
+        - Eviction / quota
+        - Stats
+        - UI
+        - Docs
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      placeholder: A fresh file was evicted. /stats looked empty after a restart. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to see it
+      description: curl or a test case. No other people's files, no live .ips.json.
+    validations:
+      required: true

@@ -1,0 +1,21 @@
+name: Feature request
+description: A behaviour that still fits a tiny public file server
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Auth, user accounts, and a second storage backend are likely to be
+        declined. This repo is one binary and two directories.
+  - type: textarea
+    id: want
+    attributes:
+      label: What you want
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+    validations:
+      required: true
